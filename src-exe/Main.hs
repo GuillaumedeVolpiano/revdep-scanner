@@ -90,8 +90,8 @@ prettyMatches m
 
 prettyResults :: HashMap Revdep (HashSet ConstrainedDep) -> String
 prettyResults m = unlines
-        $ sortBy (compare `on` fst) (M.toList m) >>= \((c,n,v),s) ->
-                let p = Package c n (Just v) Nothing Nothing
+        $ sortBy (compare `on` fst) (M.toList m) >>= \((c,n,v,sl,r),s) ->
+                let p = Package c n (Just v) (Just sl) (Just r)
                     svs = sortBy (compare `on` constrainedVersion) (S.toList s)
                 in  [ toString p
                     , "    ( " ++ L.intercalate " " (map toString svs) ++ " )"
@@ -120,7 +120,7 @@ lookupResults mode p0@(Package c0 n0 _ _ _) m0 =
 -- Types
 
 type ConstraintPkg = (Category, PkgName)
-type Revdep = (Category, PkgName, Version)
+type Revdep = (Category, PkgName, Version, Slot, Repository)
 
 -- | Organized by @(Category, PkgName)@
 --
@@ -152,9 +152,9 @@ parseAll t = do
 
 lineParser :: Parser ConstraintMap
 lineParser = do
-    ConstrainedDep Equal rdCat rdPkg rdVer _ _ <-
+    ConstrainedDep Equal rdCat rdPkg rdVer (Just rdSlot) (Just rdRepo) <-
         parser @ConstrainedDep -- parser from Data.Parsable
-    let revdep = (rdCat, rdPkg, rdVer)
+    let revdep = (rdCat, rdPkg, rdVer, rdSlot, rdRepo)
     cds <- bruteForce
     pure $ foldr (insertCM revdep) M.empty cds
   where
