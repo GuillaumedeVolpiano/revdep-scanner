@@ -33,7 +33,7 @@ import Distribution.Portage.Types
 main :: IO ()
 main = do
     pquery <- runEnv pqueryPath
-    (c, n, v, repoName, Any d) <- checkArgs
+    (p, repoName, Any d) <- checkArgs
 
     when d $ print $ pquery : args repoName
 
@@ -42,7 +42,7 @@ main = do
     (_, out, _) <- f pquery (args repoName)
     Right (m :: ConstraintMap) <- pure $ parseAll out
 
-    putStrLn $ prettyProblems (lookupProblems c n v m)
+    putStrLn $ prettyProblems (lookupProblems p m)
   where
     args n =
         [ "--all"
@@ -62,23 +62,19 @@ main = do
 -- | Lookup packages that will prevent a particular upgrade from being
 --   universally accepted in the repository.
 lookupProblems
-    :: Category
-    -> PkgName
-    -> Version
+    :: Package
     -> ConstraintMap
     -> HashMap Revdep (HashSet ConstrainedDep)
-lookupProblems c0 p0 v0 m0 =
-    case M.lookup (c0, p0) m0 of
+lookupProblems p0@(Package c0 n0 _ _ _) m0 =
+    case M.lookup (c0, n0) m0 of
         Just m -> foldr (M.unionWith S.union . go) M.empty (M.toList m)
         Nothing -> M.empty
   where
     go :: (Revdep, HashSet ConstrainedDep)
        -> HashMap Revdep (HashSet ConstrainedDep)
-    go (r, s) =
-        let p = Package c0 p0 (Just v0) Nothing Nothing
-        in if any (\d -> not (doesConstraintMatch d p)) s
-                then M.singleton r s
-                else M.empty
+    go (r, s)
+        | any (\d -> not (doesConstraintMatch d p0)) s = M.singleton r s
+        | otherwise = M.empty
 
 prettyProblems :: HashMap Revdep (HashSet ConstrainedDep) -> String
 prettyProblems m
@@ -213,7 +209,7 @@ instance Semigroup Mode where
 instance Monoid Mode where
     mempty = NormalMode mempty mempty
 
-checkArgs :: IO (Category, PkgName, Version, RepositoryName, Debug)
+checkArgs :: IO (Package, RepositoryName, Debug)
 checkArgs = do
     progName <- getProgName
     argv <- getArgs
@@ -230,15 +226,13 @@ checkArgs = do
             (NormalMode (Last r) d, [pStr]) -> case runParsable "command line argument" pStr of
                 Left e -> err $
                     "Invalid package: " ++ show e
-                Right (Package _ _ Nothing _ _) -> err $
-                    "Package must include version"
-                Right (Package c n (Just v) _ _) ->
-                    pure (c, n, v, fromMaybe "haskell" r, d)
+                Right p ->
+                    pure (p, fromMaybe "haskell" r, d)
   where
     showHelp progName = putStrLn (usageInfo (header progName) options)
 
     header progName = unlines $ unwords <$>
-        [ ["Usage:", progName, "[OPTION...]", "<cat/pkg-ver>"]
+        [ ["Usage:", progName, "[OPTION...]", "<cat/pkg[-ver]>"]
         , []
         , ["This utility will scan a Gentoo repository and gather dependency information,"]
         , ["looking for dependency constraints that would reject the provided"]
