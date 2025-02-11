@@ -37,7 +37,7 @@ common exe
     ghc-options: -threaded -rts-options=-N
 
 executable revdep-scanner
-    import:           warnings
+    import:           warnings, exe
     main-is:          Main.hs
     -- other-modules:
     -- other-extensions:
