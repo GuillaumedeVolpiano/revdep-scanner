@@ -1,16 +1,16 @@
 cabal-version:      3.4
 name:               revdep-scanner
-version:            0.0.0.0
+version:            0.1.0.0
 synopsis:           Scan Gentoo repositories for reverse dependencies
 
 tested-with:        GHC == { 9.2.8, 9.4.8, 9.6.6, 9.8.4, 9.10.1, 9.12.1 }
 -- description:
-homepage:           https://github.com/hololeap/revdep-scanner
+homepage:           https://github.com/gentoo-haskell/revdep-scanner
 license:            GPL-3.0-or-later
 license-file:       LICENSE
-author:             hololeap
+author:             Gentoo Authors
 maintainer:         hololeap@protonmail.com
-copyright:          Copyright (C) 2025 hololeap
+copyright:          Copyright (C) 2025 Gentoo Authors
 category:           Development
 build-type:         Simple
 extra-doc-files:
@@ -18,8 +18,21 @@ extra-doc-files:
     README.md
 -- extra-source-files:
 
+source-repository head
+    type:           git
+    location:       https://github.com/gentoo-haskell/cabal-portage.git
+    branch:         main
+    subdir:         portage-hs
+
+flag pedantic
+    description: Enable -Werror
+    default:     False
+    manual:      True
+
 common warnings
     ghc-options: -Wall
+    if flag(pedantic)
+        ghc-options:    -Werror
 
 common exe
     ghc-options: -threaded -rts-options=-N
