@@ -27,6 +27,8 @@ import System.IO (Handle, stdout, stderr)
 import Text.Parsec.Char
 import Text.Parsec.String
 
+import Text.Pretty.Simple (pPrintForceColor)
+
 import Data.Parsable
 import Distribution.Portage.Types
 
@@ -41,6 +43,8 @@ main = do
 
     (_, out, _) <- f pquery (args repoName)
     Right (m :: ConstraintMap) <- pure $ parseAll out
+
+    when d $ pPrintForceColor m
 
     let r = lookupResults mode p m
     putStrLn $ case mode of
