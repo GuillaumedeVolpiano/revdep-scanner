@@ -20,9 +20,8 @@ extra-doc-files:
 
 source-repository head
     type:           git
-    location:       https://github.com/gentoo-haskell/cabal-portage.git
+    location:       https://github.com/gentoo-haskell/revdep-scanner.git
     branch:         main
-    subdir:         portage-hs
 
 flag pedantic
     description: Enable -Werror
