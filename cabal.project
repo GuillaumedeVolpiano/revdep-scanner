@@ -3,7 +3,7 @@ packages: .
 source-repository-package
     type: git
     location: https://github.com/hololeap/cabal-portage.git
-    tag: 0313b345d339ce609e1a31a6a5306dc885cf6a95
+    tag: ae6bd1dc41ffdd7ccadaf33f6da21a1a208fd63d
     subdir:
         parsable
         parsable-test

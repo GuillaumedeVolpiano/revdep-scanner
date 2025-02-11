@@ -2,25 +2,31 @@
 Scan Gentoo repositories for reverse dependencies
 
 ```
-Usage: revdep-scanner [OPTION...] <cat/pkg-ver>
+Usage: revdep-scanner [OPTION...] <cat/pkg[-ver]>
 
-This utility will scan a Gentoo repository and gather dependency information,
-looking for dependency constraints that would reject the provided
+This utility will scan a Gentoo repository and gather dependency information.
+
+--matching (default when no version is provided)
+Looks for dependencies that match the given package atom.
+
+--non-matching (default when version is provided)
+Looks for dependency constraints that would reject the provided
 package/version.
-
 For example: revdep-scanner dev-haskell/network-3.2 would match
 "<dev-haskell/network-3.2" as a problematic dependency.
 
   -h             --help             Show this help text
   -r REPOSITORY  --repo=REPOSITORY  Limit to a repository (defaults to "haskell")
                  --debug            Display debug information
+                 --matching         Look for matching dependencies
+                 --non-matching     Look for non-matching relevant dependencies
 ```
 
 ---
 
 Example:
 
-```cmdline
+```
 $ revdep-scanner dev-haskell/network-3.2
 Packages with at least one problematic constraint:
 

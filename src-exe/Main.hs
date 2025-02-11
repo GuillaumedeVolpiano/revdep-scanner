@@ -33,7 +33,7 @@ import Distribution.Portage.Types
 main :: IO ()
 main = do
     pquery <- runEnv pqueryPath
-    (p, repoName, Any d) <- checkArgs
+    (p, mode, repoName, Any d) <- checkArgs
 
     when d $ print $ pquery : args repoName
 
@@ -42,7 +42,9 @@ main = do
     (_, out, _) <- f pquery (args repoName)
     Right (m :: ConstraintMap) <- pure $ parseAll out
 
-    putStrLn $ prettyProblems (lookupProblems p m)
+    putStrLn $ case mode of
+        Matching -> prettyMatches (lookupMatches p m)
+        NonMatching -> prettyProblems (lookupProblems p m)
   where
     args n =
         [ "--all"
@@ -83,7 +85,40 @@ prettyProblems m
         $ "Packages with at least one problematic constraint:"
         : ""
         : "package"
-        : "    ( relevant constraints ):"
+        : "    ( relevant dependencies ):"
+        : ""
+        : (
+            sortBy (compare `on` fst) (M.toList m) >>= \((c,n,v),s) ->
+                let p = Package c n (Just v) Nothing Nothing
+                    svs = sortBy (compare `on` constrainedVersion) (S.toList s)
+                in  [ toString p
+                    , "    ( " ++ L.intercalate " " (map toString svs) ++ " )"
+                    ]
+        )
+
+lookupMatches
+    :: Package
+    -> ConstraintMap
+    -> HashMap Revdep (HashSet ConstrainedDep)
+lookupMatches p0@(Package c0 n0 _ _ _) m0 =
+    case M.lookup (c0, n0) m0 of
+        Just m -> foldr (M.unionWith S.union . go) M.empty (M.toList m)
+        Nothing -> M.empty
+  where
+    go :: (Revdep, HashSet ConstrainedDep)
+       -> HashMap Revdep (HashSet ConstrainedDep)
+    go (r, s)
+        | any (\d -> doesConstraintMatch d p0) s = M.singleton r s
+        | otherwise = M.empty
+
+prettyMatches :: HashMap Revdep (HashSet ConstrainedDep) -> String
+prettyMatches m
+    | M.null m = "No matches found!"
+    | otherwise = unlines
+        $ "Packages with at least one matching dependency:"
+        : ""
+        : "package"
+        : "    ( relevant dependencies ):"
         : ""
         : (
             sortBy (compare `on` fst) (M.toList m) >>= \((c,n,v),s) ->
@@ -196,20 +231,26 @@ runTransparent exe args
 type RepositoryName = String
 type Debug = Any
 
+data MatchMode
+    = Matching
+    | NonMatching
+    deriving (Show, Eq, Ord)
+
 data Mode
     = HelpMode
-    | NormalMode (Last RepositoryName) Debug
+    | NormalMode (Last MatchMode) (Last RepositoryName) Debug
     deriving (Show, Eq, Ord)
 
 instance Semigroup Mode where
     HelpMode <> _ = HelpMode
     _ <> HelpMode = HelpMode
-    NormalMode r1 d1 <> NormalMode r2 d2 = NormalMode (r1 <> r2) (d1 <> d2)
+    NormalMode m1 r1 d1 <> NormalMode m2 r2 d2
+        = NormalMode (m1 <> m2) (r1 <> r2) (d1 <> d2)
 
 instance Monoid Mode where
-    mempty = NormalMode mempty mempty
+    mempty = NormalMode mempty mempty mempty
 
-checkArgs :: IO (Package, RepositoryName, Debug)
+checkArgs :: IO (Package, MatchMode, RepositoryName, Debug)
 checkArgs = do
     progName <- getProgName
     argv <- getArgs
@@ -223,30 +264,44 @@ checkArgs = do
             (_, []) -> err "Full package name and version required"
             (_,(_:as'@(_:_))) -> err
                 ("Extra command-line arguments given: " ++ show as')
-            (NormalMode (Last r) d, [pStr]) -> case runParsable "command line argument" pStr of
+            (NormalMode (Last mm) (Last mr) d, [pStr]) -> case runParsable "command line argument" pStr of
                 Left e -> err $
                     "Invalid package: " ++ show e
-                Right p ->
-                    pure (p, fromMaybe "haskell" r, d)
+                Right p@(Package _ _ mv _ _) ->
+                    let m = case (mm, mv) of
+                                (Just m', _) -> m'
+                                (Nothing, Just _) -> NonMatching
+                                _ -> Matching
+                    in  pure (p, m, fromMaybe "haskell" mr, d)
   where
     showHelp progName = putStrLn (usageInfo (header progName) options)
 
     header progName = unlines $ unwords <$>
         [ ["Usage:", progName, "[OPTION...]", "<cat/pkg[-ver]>"]
         , []
-        , ["This utility will scan a Gentoo repository and gather dependency information,"]
-        , ["looking for dependency constraints that would reject the provided"]
-        , ["package/version."]
+        , ["This utility will scan a Gentoo repository and gather dependency information."]
         , []
-        , ["For example:", progName, "dev-haskell/network-3.2 would match"]
-        , ["\"<dev-haskell/network-3.2\" as a problematic dependency."]
+        , ["--matching (default when no version is provided)"]
+        , ["Looks for dependencies that match the given package atom."]
+        , []
+        , ["--non-matching (default when version is provided)"]
+        , ["Looks for dependency constraints that would reject the provided"]
+        , ["package/version. For example:", progName, "dev-haskell/network-3.2 would"]
+        , ["match \"<dev-haskell/network-3.2\" as a problematic dependency."]
         ]
 
     options :: [OptDescr Mode]
     options =
         [ Option ['h'] ["help"] (NoArg HelpMode) "Show this help text"
-        , Option ['r'] ["repo"] (ReqArg (\r -> NormalMode (pure r) mempty) "REPOSITORY")
+        , Option ['r'] ["repo"]
+            (ReqArg (\r -> NormalMode mempty (pure r) mempty) "REPOSITORY")
             "Limit to a repository (defaults to \"haskell\")"
-        , Option [] ["debug"] (NoArg (NormalMode mempty (Any True)))
+        , Option [] ["debug"] (NoArg (NormalMode mempty mempty (Any True)))
             "Display debug information"
+        , Option [] ["matching"]
+            (NoArg (NormalMode (pure Matching) mempty mempty))
+            "Look for matching dependencies"
+        , Option [] ["non-matching"]
+            (NoArg (NormalMode (pure NonMatching) mempty mempty))
+            "Look for non-matching relevant dependencies"
         ]
