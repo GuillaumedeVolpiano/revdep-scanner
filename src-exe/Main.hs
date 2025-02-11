@@ -51,7 +51,7 @@ main = do
         Matching -> prettyMatches r
         NonMatching -> prettyProblems r
   where
-    args n =
+    args (Repository n) =
         [ "--all"
         , "--raw"
         , "--unfiltered"
@@ -216,7 +216,6 @@ runTransparent exe args
 
 -- Command line
 
-type RepositoryName = String
 type Debug = Any
 
 data MatchMode
@@ -226,7 +225,7 @@ data MatchMode
 
 data Mode
     = HelpMode
-    | NormalMode (Last MatchMode) (Last RepositoryName) Debug
+    | NormalMode (Last MatchMode) (Last Repository) Debug
     deriving (Show, Eq, Ord)
 
 instance Semigroup Mode where
@@ -238,7 +237,7 @@ instance Semigroup Mode where
 instance Monoid Mode where
     mempty = NormalMode mempty mempty mempty
 
-checkArgs :: IO (Package, MatchMode, RepositoryName, Debug)
+checkArgs :: IO (Package, MatchMode, Repository, Debug)
 checkArgs = do
     progName <- getProgName
     argv <- getArgs
@@ -252,15 +251,16 @@ checkArgs = do
             (_, []) -> err "Full package name and version required"
             (_,(_:as'@(_:_))) -> err
                 ("Extra command-line arguments given: " ++ show as')
-            (NormalMode (Last mm) (Last mr) d, [pStr]) -> case runParsable "command line argument" pStr of
-                Left e -> err $
-                    "Invalid package: " ++ show e
-                Right p@(Package _ _ mv _ _) ->
-                    let m = case (mm, mv) of
-                                (Just m', _) -> m'
-                                (Nothing, Just _) -> NonMatching
-                                _ -> Matching
-                    in  pure (p, m, fromMaybe "haskell" mr, d)
+            (NormalMode (Last mm) (Last mr) d, [pStr]) ->
+                case runParsable "command line argument" pStr of
+                    Left e -> err $
+                        "Invalid package: " ++ show e
+                    Right p@(Package _ _ mv _ _) ->
+                        let m = case (mm, mv) of
+                                    (Just m', _) -> m'
+                                    (Nothing, Just _) -> NonMatching
+                                    _ -> Matching
+                        in  pure (p, m, fromMaybe (Repository "haskell") mr, d)
   where
     showHelp progName = putStrLn (usageInfo (header progName) options)
 
@@ -282,7 +282,9 @@ checkArgs = do
     options =
         [ Option ['h'] ["help"] (NoArg HelpMode) "Show this help text"
         , Option ['r'] ["repo"]
-            (ReqArg (\r -> NormalMode mempty (pure r) mempty) "REPOSITORY")
+            (ReqArg (\r -> NormalMode mempty (pure (Repository r)) mempty)
+                "REPOSITORY"
+            )
             "Limit to a repository (defaults to \"haskell\")"
         , Option [] ["debug"] (NoArg (NormalMode mempty mempty (Any True)))
             "Display debug information"
