@@ -11,9 +11,8 @@ Looks for dependencies that match the given package atom.
 
 --non-matching (default when version is provided)
 Looks for dependency constraints that would reject the provided
-package/version.
-For example: revdep-scanner dev-haskell/network-3.2 would match
-"<dev-haskell/network-3.2" as a problematic dependency.
+package/version. For example: `revdep-scanner dev-haskell/network-3.2` would
+match "<dev-haskell/network-3.2" as a problematic dependency.
 
   -h             --help             Show this help text
   -r REPOSITORY  --repo=REPOSITORY  Limit to a repository (defaults to "haskell")
@@ -24,14 +23,31 @@ For example: revdep-scanner dev-haskell/network-3.2 would match
 
 ---
 
-Example:
+Examples:
+
+```
+$ revdep-scanner dev-haskell/hnix-store-core
+Packages with at least one matching dependency:
+
+package
+    ( relevant dependencies ):
+
+dev-haskell/hnix-0.16.0-r1:0::haskell
+    ( >=dev-haskell/hnix-store-core-0.5.0 <dev-haskell/hnix-store-core-0.6 )
+dev-haskell/hnix-store-json-0.1.0.0:0::haskell
+    ( >=dev-haskell/hnix-store-core-0.8 )
+dev-haskell/hnix-store-remote-0.7.0.0:0::haskell
+    ( >=dev-haskell/hnix-store-core-0.8 <dev-haskell/hnix-store-core-0.9 )
+dev-haskell/hnix-store-tests-0.1.0.0:0::haskell
+    ( >=dev-haskell/hnix-store-core-0.8 )
+```
 
 ```
 $ revdep-scanner dev-haskell/network-3.2
 Packages with at least one problematic constraint:
 
 package
-    ( relevant constraints ):
+    ( relevant dependencies ):
 
 dev-haskell/dbus-1.3.2
     ( >=dev-haskell/network-3.1.2.1 <dev-haskell/network-3.2 )

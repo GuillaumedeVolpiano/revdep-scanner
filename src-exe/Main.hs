@@ -248,7 +248,7 @@ checkArgs = do
 
         (ms,as,_) -> case (mconcat ms, as) of
             (HelpMode, _) -> showHelp progName *> exitSuccess
-            (_, []) -> err "Full package name and version required"
+            (_, []) -> err "Full package name (and optional version) required"
             (_,(_:as'@(_:_))) -> err
                 ("Extra command-line arguments given: " ++ show as')
             (NormalMode (Last mm) (Last mr) d, [pStr]) ->
@@ -257,8 +257,11 @@ checkArgs = do
                         "Invalid package: " ++ show e
                     Right p@(Package _ _ mv _ _) ->
                         let m = case (mm, mv) of
-                                    (Just m', _) -> m'
+                                    -- MatchMode was explicitly set
+                                    (Just mode, _) -> mode
+                                    -- Not explicitly set, version specified
                                     (Nothing, Just _) -> NonMatching
+                                    -- Not explicitly set, no version specified
                                     _ -> Matching
                         in  pure (p, m, fromMaybe (Repository "haskell") mr, d)
   where
@@ -274,7 +277,7 @@ checkArgs = do
         , []
         , ["--non-matching (default when version is provided)"]
         , ["Looks for dependency constraints that would reject the provided"]
-        , ["package/version. For example:", progName, "dev-haskell/network-3.2 would"]
+        , ["package/version. For example:", "`" ++ progName, "dev-haskell/network-3.2` would"]
         , ["match \"<dev-haskell/network-3.2\" as a problematic dependency."]
         ]
 
