@@ -42,9 +42,10 @@ main = do
     (_, out, _) <- f pquery (args repoName)
     Right (m :: ConstraintMap) <- pure $ parseAll out
 
+    let r = lookupResults mode p m
     putStrLn $ case mode of
-        Matching -> prettyMatches (lookupMatches p m)
-        NonMatching -> prettyProblems (lookupProblems p m)
+        Matching -> prettyMatches r
+        NonMatching -> prettyProblems r
   where
     args n =
         [ "--all"
@@ -61,23 +62,6 @@ main = do
         , "--slot"
         ]
 
--- | Lookup packages that will prevent a particular upgrade from being
---   universally accepted in the repository.
-lookupProblems
-    :: Package
-    -> ConstraintMap
-    -> HashMap Revdep (HashSet ConstrainedDep)
-lookupProblems p0@(Package c0 n0 _ _ _) m0 =
-    case M.lookup (c0, n0) m0 of
-        Just m -> foldr (M.unionWith S.union . go) M.empty (M.toList m)
-        Nothing -> M.empty
-  where
-    go :: (Revdep, HashSet ConstrainedDep)
-       -> HashMap Revdep (HashSet ConstrainedDep)
-    go (r, s)
-        | any (\d -> not (doesConstraintMatch d p0)) s = M.singleton r s
-        | otherwise = M.empty
-
 prettyProblems :: HashMap Revdep (HashSet ConstrainedDep) -> String
 prettyProblems m
     | M.null m = "No problematic packages found!"
@@ -87,29 +71,7 @@ prettyProblems m
         : "package"
         : "    ( relevant dependencies ):"
         : ""
-        : (
-            sortBy (compare `on` fst) (M.toList m) >>= \((c,n,v),s) ->
-                let p = Package c n (Just v) Nothing Nothing
-                    svs = sortBy (compare `on` constrainedVersion) (S.toList s)
-                in  [ toString p
-                    , "    ( " ++ L.intercalate " " (map toString svs) ++ " )"
-                    ]
-        )
-
-lookupMatches
-    :: Package
-    -> ConstraintMap
-    -> HashMap Revdep (HashSet ConstrainedDep)
-lookupMatches p0@(Package c0 n0 _ _ _) m0 =
-    case M.lookup (c0, n0) m0 of
-        Just m -> foldr (M.unionWith S.union . go) M.empty (M.toList m)
-        Nothing -> M.empty
-  where
-    go :: (Revdep, HashSet ConstrainedDep)
-       -> HashMap Revdep (HashSet ConstrainedDep)
-    go (r, s)
-        | any (\d -> doesConstraintMatch d p0) s = M.singleton r s
-        | otherwise = M.empty
+        : [ prettyResults m ]
 
 prettyMatches :: HashMap Revdep (HashSet ConstrainedDep) -> String
 prettyMatches m
@@ -120,14 +82,36 @@ prettyMatches m
         : "package"
         : "    ( relevant dependencies ):"
         : ""
-        : (
-            sortBy (compare `on` fst) (M.toList m) >>= \((c,n,v),s) ->
+        : [ prettyResults m ]
+
+prettyResults :: HashMap Revdep (HashSet ConstrainedDep) -> String
+prettyResults m = unlines
+        $ sortBy (compare `on` fst) (M.toList m) >>= \((c,n,v),s) ->
                 let p = Package c n (Just v) Nothing Nothing
                     svs = sortBy (compare `on` constrainedVersion) (S.toList s)
                 in  [ toString p
                     , "    ( " ++ L.intercalate " " (map toString svs) ++ " )"
                     ]
-        )
+
+lookupResults
+    :: MatchMode
+    -> Package
+    -> ConstraintMap
+    -> HashMap Revdep (HashSet ConstrainedDep)
+lookupResults mode p0@(Package c0 n0 _ _ _) m0 =
+    case M.lookup (c0, n0) m0 of
+        Just m -> foldr (M.unionWith S.union . go) M.empty (M.toList m)
+        Nothing -> M.empty
+  where
+    go :: (Revdep, HashSet ConstrainedDep)
+       -> HashMap Revdep (HashSet ConstrainedDep)
+    go (r, s)
+        | any check s = M.singleton r s
+        | otherwise = M.empty
+
+    check d = case mode of
+        Matching -> doesConstraintMatch d p0
+        NonMatching -> not (doesConstraintMatch d p0)
 
 -- Types
 
