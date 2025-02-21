@@ -66,7 +66,7 @@ main = do
         , "--slot"
         ]
 
-prettyProblems :: HashMap Revdep (HashSet ConstrainedDep) -> String
+prettyProblems :: HashMap Revdep (HashSet ParsedDep) -> String
 prettyProblems m
     | M.null m = "No problematic packages found!"
     | otherwise = unlines
@@ -77,7 +77,7 @@ prettyProblems m
         : ""
         : [ prettyResults m ]
 
-prettyMatches :: HashMap Revdep (HashSet ConstrainedDep) -> String
+prettyMatches :: HashMap Revdep (HashSet ParsedDep) -> String
 prettyMatches m
     | M.null m = "No matches found!"
     | otherwise = unlines
@@ -88,51 +88,71 @@ prettyMatches m
         : ""
         : [ prettyResults m ]
 
-prettyResults :: HashMap Revdep (HashSet ConstrainedDep) -> String
+prettyResults :: HashMap Revdep (HashSet ParsedDep) -> String
 prettyResults m = unlines
         $ sortBy (compare `on` fst) (M.toList m) >>= \((c,n,v,sl,r),s) ->
                 let p = Package c n (Just v) (Just sl) (Just r)
-                    svs = sortBy (compare `on` constrainedVersion) (S.toList s)
+                    svs = sortBy cmp (S.toList s)
                 in  [ toString p
-                    , "    ( " ++ L.intercalate " " (map toString svs) ++ " )"
+                    , "    ( " ++ L.intercalate " " (map toStr svs) ++ " )"
                     ]
+  where
+    cmp :: ParsedDep -> ParsedDep -> Ordering
+    cmp pd1 pd2 = case (pd1, pd2) of
+        (Left (ConstrainedDep _ _ _ v1 _ _), Left (ConstrainedDep _ _ _ v2 _ _))
+            -> v1 `compare` v2
+        (Left _, Right _) -> GT
+        (Right _, Left _) -> LT
+        (_, _) -> EQ
+
+    toStr :: ParsedDep -> String
+    toStr = \case
+        Left cd -> toString cd
+        Right (c,n) -> toString $ Package c n Nothing Nothing Nothing
 
 lookupResults
     :: MatchMode
     -> Package
     -> ConstraintMap
-    -> HashMap Revdep (HashSet ConstrainedDep)
+    -> HashMap Revdep (HashSet ParsedDep)
 lookupResults mode p0@(Package c0 n0 _ _ _) m0 =
     case M.lookup (c0, n0) m0 of
         Just m -> foldr (M.unionWith S.union . go) M.empty (M.toList m)
         Nothing -> M.empty
   where
-    go :: (Revdep, HashSet ConstrainedDep)
-       -> HashMap Revdep (HashSet ConstrainedDep)
+    go :: (Revdep, HashSet (ParsedDep)) -> HashMap Revdep (HashSet ParsedDep)
     go (r, s)
         | any check s = M.singleton r s
         | otherwise = M.empty
 
-    check d = case mode of
-        Matching -> doesConstraintMatch d p0
-        NonMatching -> not (doesConstraintMatch d p0)
+    check d = case (mode, d) of
+        (Matching, Left cd) -> doesConstraintMatch cd p0
+        (Matching, Right (c,n)) -> c == c0 && n == n0
+        (NonMatching, Left cd) -> not (doesConstraintMatch cd p0)
+        (NonMatching, Right _) -> False
 
 -- Types
 
 type ConstraintPkg = (Category, PkgName)
 type Revdep = (Category, PkgName, Version, Slot, Repository)
+type BasicDep = (Category, PkgName)
+type ParsedDep = Either ConstrainedDep BasicDep
 
 -- | Organized by @(Category, PkgName)@
 --
 --   The inner map is keyed by the reverse dependency and contains a set of
 --   constraints that match the same @(Category, PkgName)@ as the outermost key.
 type ConstraintMap = HashMap ConstraintPkg
-    (HashMap Revdep (HashSet ConstrainedDep))
+    (HashMap Revdep (HashSet ParsedDep))
 
-insertCM :: Revdep -> ConstrainedDep -> ConstraintMap -> ConstraintMap
-insertCM revdep cdep@(ConstrainedDep _ ccat cpkg _ _ _) cmap0 =
+insertCM :: Revdep -> ParsedDep -> ConstraintMap -> ConstraintMap
+insertCM revdep dep cmap0 =
     unionCM cmap0 $
-        M.singleton (ccat,cpkg) (M.singleton revdep (S.singleton cdep))
+        M.singleton (ccat,cpkg) (M.singleton revdep (S.singleton dep))
+  where
+    (ccat, cpkg) = case dep of
+        Left (ConstrainedDep _ c p _ _ _) -> (c,p)
+        Right bDep -> bDep
 
 unionCM :: ConstraintMap -> ConstraintMap -> ConstraintMap
 unionCM = M.unionWith (M.unionWith S.union)
@@ -158,12 +178,15 @@ lineParser = do
     cds <- bruteForce
     pure $ foldr (insertCM revdep) M.empty cds
   where
-    -- Start with char 0, see if it's a valid ConstrainedDep
-    -- Try next char, see if it's a valid ConstrainedDep
+    -- Start with char 0, see if it's a valid ConstrainedDep /or/ Package.
+    -- Try next char, see if it's a valid ConstrainedDep /or Package.
     -- etc...
-    bruteForce :: Parser [ConstrainedDep]
+    bruteForce :: Parser [ParsedDep]
     bruteForce = choice
-        [ try $ (:) <$> parser @ConstrainedDep <*> bruteForce
+        [ try $ (:) <$> (Left <$> parser @ConstrainedDep) <*> bruteForce
+        , try $ do
+            Package c n Nothing _ _ <- parser
+            (Right (c,n) :) <$> bruteForce
         , try $ [] <$ eof
         , anyChar *> bruteForce
         ]
