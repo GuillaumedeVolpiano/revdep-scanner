@@ -11,11 +11,13 @@ import Control.Monad.Trans.Accum
 import qualified Data.ByteString as BS
 import Data.Function (on)
 import Data.List as L
+import qualified Data.List.NonEmpty as NE
+import           Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.HashMap.Strict as M
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashSet as S
 import           Data.HashSet (HashSet)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import qualified Data.Text.Lazy as TL
 import Data.Conduit.Process
 import Data.Monoid
@@ -23,7 +25,7 @@ import System.Directory
 import System.Console.GetOpt
 import System.Environment
 import System.Exit
-import System.IO (Handle, stdout, stderr)
+import System.IO (Handle, stdout, stderr, hPutStrLn)
 import Text.Parsec.Char
 import Text.Parsec.String
 
@@ -35,7 +37,7 @@ import Distribution.Portage.Types
 main :: IO ()
 main = do
     pquery <- runEnv pqueryPath
-    (p, mode, repoName, Any d) <- checkArgs
+    (ps, mode, repoName, Any d) <- checkArgs
 
     when d $ print $ pquery : args repoName
 
@@ -46,10 +48,12 @@ main = do
 
     when d $ pPrintForceColor m
 
-    let r = lookupResults mode p m
-    putStrLn $ case mode of
-        Matching -> prettyMatches r
-        NonMatching -> prettyProblems r
+    let ls = ps >>= \p -> do
+            let r = lookupResults mode p m
+            case mode of
+                Matching -> prettyMatches p r
+                NonMatching -> prettyProblems p r
+    putStr $ unlines $ NE.toList ls
   where
     args (Repository n) =
         [ "--all"
@@ -66,35 +70,35 @@ main = do
         , "--slot"
         ]
 
-prettyProblems :: HashMap Revdep (HashSet ParsedDep) -> String
-prettyProblems m
-    | M.null m = "No problematic packages found!"
-    | otherwise = unlines
-        $ "Packages with at least one problematic constraint:"
-        : ""
-        : "package"
-        : "    ( relevant dependencies ):"
-        : ""
-        : [ prettyResults m ]
+prettyProblems
+    :: Package
+    -> HashMap Revdep (HashSet ParsedDep)
+    -> NonEmpty String
+prettyProblems p m
+    | M.null m = NE.singleton
+        $ toString p ++ ": No problematic packages found!"
+    | otherwise
+        = (toString p ++ ":")
+        :| prettyResults m
 
-prettyMatches :: HashMap Revdep (HashSet ParsedDep) -> String
-prettyMatches m
-    | M.null m = "No matches found!"
-    | otherwise = unlines
-        $ "Packages with at least one matching dependency:"
-        : ""
-        : "package"
-        : "    ( relevant dependencies ):"
-        : ""
-        : [ prettyResults m ]
+prettyMatches
+    :: Package
+    -> HashMap Revdep (HashSet ParsedDep)
+    -> NonEmpty String
+prettyMatches p m
+    | M.null m = NE.singleton
+        $ toString p ++ ": No matches found!"
+    | otherwise
+        = (toString p ++ ":")
+        :| prettyResults m
 
-prettyResults :: HashMap Revdep (HashSet ParsedDep) -> String
-prettyResults m = unlines
-        $ sortBy (compare `on` fst) (M.toList m) >>= \((c,n,v,sl,r),s) ->
+prettyResults :: HashMap Revdep (HashSet ParsedDep) -> [String]
+prettyResults m =
+          sortBy (compare `on` fst) (M.toList m) >>= \((c,n,v,sl,r),s) ->
                 let p = Package c n (Just v) (Just sl) (Just r)
                     svs = sortBy cmp (S.toList s)
-                in  [ toString p
-                    , "    ( " ++ L.intercalate " " (map toStr svs) ++ " )"
+                in  [ "    " ++ toString p
+                    , "        ( " ++ L.intercalate " " (map toStr svs) ++ " )"
                     ]
   where
     cmp :: ParsedDep -> ParsedDep -> Ordering
@@ -260,7 +264,7 @@ instance Semigroup Mode where
 instance Monoid Mode where
     mempty = NormalMode mempty mempty mempty
 
-checkArgs :: IO (Package, MatchMode, Repository, Debug)
+checkArgs :: IO (NonEmpty Package, MatchMode, Repository, Debug)
 checkArgs = do
     progName <- getProgName
     argv <- getArgs
@@ -269,29 +273,24 @@ checkArgs = do
     case getOpt Permute options argv of
         (_,_,es@(_:_)) -> err (intercalate " " es)
 
-        (ms,as,_) -> case (mconcat ms, as) of
+        (ms,as,_) -> case (mconcat ms, NE.nonEmpty as) of
             (HelpMode, _) -> showHelp progName *> exitSuccess
-            (_, []) -> err "Full package name (and optional version) required"
-            (_,(_:as'@(_:_))) -> err
-                ("Extra command-line arguments given: " ++ show as')
-            (NormalMode (Last mm) (Last mr) d, [pStr]) ->
-                case runParsable "command line argument" pStr of
+            (_, Nothing) -> err "At least one full package name (and optional \
+                           \version) required"
+            (NormalMode (Last mm) (Last mr) d, Just pStrs) ->
+                case traverse (runParsable "command line argument") pStrs of
                     Left e -> err $
                         "Invalid package: " ++ show e
-                    Right p@(Package _ _ mv _ _) ->
-                        let m = case (mm, mv) of
-                                    -- MatchMode was explicitly set
-                                    (Just mode, _) -> mode
-                                    -- Not explicitly set, version specified
-                                    (Nothing, Just _) -> NonMatching
-                                    -- Not explicitly set, no version specified
-                                    _ -> Matching
-                        in  pure (p, m, fromMaybe (Repository "haskell") mr, d)
+                    Right ps -> do
+                        m <- case mm of
+                            Just mode -> pure mode
+                            Nothing -> detectMode ps
+                        pure (ps, m, fromMaybe (Repository "haskell") mr, d)
   where
     showHelp progName = putStrLn (usageInfo (header progName) options)
 
     header progName = unlines $ unwords <$>
-        [ ["Usage:", progName, "[OPTION...]", "<cat/pkg[-ver]>"]
+        [ ["Usage:", progName, "[OPTION...]", "<cat/pkg[-ver]... >"]
         , []
         , ["This utility will scan a Gentoo repository and gather dependency information."]
         , []
@@ -321,3 +320,13 @@ checkArgs = do
             (NoArg (NormalMode (pure NonMatching) mempty mempty))
             "Look for non-matching relevant dependencies"
         ]
+
+    detectMode :: Foldable f => f Package -> IO MatchMode
+    detectMode ps
+        | all (isJust . getVersion) ps = pure NonMatching
+        | all (isNothing . getVersion) ps = pure Matching
+        | otherwise = do
+            hPutStrLn stderr "Warning: Mix of versioned and non-versioned \
+                             \packages were given on the command\n\
+                             \line. Defaulting to \"non-matching mode\"."
+            pure NonMatching
